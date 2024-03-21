@@ -1,4 +1,7 @@
 {
+  "tasks": {
+    "dev": "deno run -A --watch src/mod.ts"
+  },
   "imports": {
     "mtkruto/": "https://deno.land/x/mtkruto@0.1.170/",
     "std/": "https://deno.land/std@0.220.1/",

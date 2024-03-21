@@ -3,8 +3,8 @@ import { config } from "./config.ts";
 
 const client = new Client(
   new StorageMemory(config.session),
-  config.api.id,
-  config.api.hash,
+  config.telegram.id,
+  config.telegram.hash,
 );
 
 await client.start();
@@ -29,15 +29,26 @@ const makeResponse = ({ status = 200, body = undefined }: { status?: number; bod
 const isVaildStatus = (status: string | undefined): status is keyof typeof FOCUS_TO_EMOJI_ID =>
   (status ?? "") in FOCUS_TO_EMOJI_ID;
 
-Deno.serve(async (req) => {
-  const url = new URL(req.url);
-  if (req.method !== "POST") return makeResponse({ status: 405, body: { error: `Invalid method: ${req.method}` } });
-  if (!url.pathname.startsWith("/status/")) return makeResponse({ status: 404 });
-  const status = url.pathname.split("/").pop();
+const isValidSecret = (req: Request, secret: string | undefined) => {
+  if (!secret) return true;
+  const header = req.headers.get("Authorization");
+  return header === secret;
+};
 
-  if (!isVaildStatus(status)) {
-    return makeResponse({ status: 400, body: { error: `Invalid status: ${status}` } });
-  }
+const isValidRequest = (req: Request) => {
+  const url = new URL(req.url);
+  if (req.method !== "POST") return false;
+  if (!url.pathname.startsWith("/status/")) return false;
+  return true
+};
+
+Deno.serve(async (req) => {
+  if (!isValidSecret(req, config.secret)) return makeResponse({ status: 401, body: { error: "Unauthorized" } });
+  if (!isValidRequest(req)) return makeResponse({ status: 400, body: { error: "Invalid request" } });
+
+  const status = req.url.split("/").pop();
+
+  if (!isVaildStatus(status)) return makeResponse({ status: 400, body: { error: `Invalid status: ${status}` } });
 
   const emojiId = FOCUS_TO_EMOJI_ID[status];
 
