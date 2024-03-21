@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "mtkruto/": "https://deno.land/x/mtkruto@0.1.170/",
+    "std/": "https://deno.land/std@0.220.1/",
+    "x/": "https://deno.land/x/",
+    "zod": "npm:zod@^3.22.4"
+  },
+  "fmt": {
+    "lineWidth": 120
+  }
+}
