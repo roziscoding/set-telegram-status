@@ -1,6 +1,8 @@
 {
   "tasks": {
-    "dev": "deno run -A --watch src/mod.ts"
+    "dev": "deno run -A --watch --unstable-kv src/mod.ts",
+    "lock": "deno run -A --unstable-kv src/lock.ts",
+    "auth": "deno run -A src/auth.ts"
   },
   "imports": {
     "mtkruto/": "https://deno.land/x/mtkruto@0.1.170/",

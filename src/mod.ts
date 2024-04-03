@@ -1,20 +1,14 @@
 import { Client, StorageMemory, types } from "mtkruto/mod.ts";
 import { config } from "./config.ts";
 
-const client = new Client(
-  new StorageMemory(config.session),
-  config.telegram.id,
-  config.telegram.hash,
-);
+const kv = await Deno.openKv(config.kv.path);
 
-await client.start();
-
-const FOCUS_TO_EMOJI_ID = {
-  work: "5418063924933173277",
-  sleep: "5451959871257713464",
-  drive: "5445085952194124000",
-  doNotDisturb: "5332296662142434561",
-  none: "5276020560361432449",
+const getClient = () => {
+  return new Client(
+    new StorageMemory(config.session),
+    config.telegram.id,
+    config.telegram.hash,
+  );
 };
 
 const makeResponse = ({ status = 200, body = undefined }: { status?: number; body?: unknown }) =>
@@ -26,9 +20,6 @@ const makeResponse = ({ status = 200, body = undefined }: { status?: number; bod
     },
   );
 
-const isVaildStatus = (status: string | undefined): status is keyof typeof FOCUS_TO_EMOJI_ID =>
-  (status ?? "") in FOCUS_TO_EMOJI_ID;
-
 const isValidSecret = (req: Request, secret: string | undefined) => {
   if (!secret) return true;
   const header = req.headers.get("Authorization");
@@ -38,23 +29,97 @@ const isValidSecret = (req: Request, secret: string | undefined) => {
 const isValidRequest = (req: Request) => {
   const url = new URL(req.url);
   if (req.method !== "POST") return false;
-  if (!url.pathname.startsWith("/status/")) return false;
-  return true
+  if (!url.pathname.endsWith("/status")) return false;
+  return true;
+};
+
+const setStatus = async (client: Client, emojiId: string, manageLock = true) => {
+  if (manageLock) await kv.set(["LOCKED"], true);
+
+  try {
+    await client.api.account.updateEmojiStatus({
+      emoji_status: new types.EmojiStatus({ document_id: BigInt(emojiId) }),
+    });
+
+    return new Response();
+  } catch (err) {
+    return makeResponse({ status: 500, body: { error: err.message } });
+  } finally {
+    if (manageLock) await kv.set(["LOCKED"], false);
+  }
 };
 
 Deno.serve(async (req) => {
-  if (!isValidSecret(req, config.secret)) return makeResponse({ status: 401, body: { error: "Unauthorized" } });
-  if (!isValidRequest(req)) return makeResponse({ status: 400, body: { error: "Invalid request" } });
+  try {
+    if (!isValidSecret(req, config.secret)) return makeResponse({ status: 401, body: { error: "Unauthorized" } });
+    if (!isValidRequest(req)) return makeResponse({ status: 400, body: { error: "Invalid request" } });
 
-  const status = req.url.split("/").pop();
+    const url = new URL(req.url);
+    const emojiId = url.searchParams.get("emojiId");
 
-  if (!isVaildStatus(status)) return makeResponse({ status: 400, body: { error: `Invalid status: ${status}` } });
+    if (!emojiId) return makeResponse({ status: 400, body: { error: "Invalid request. Missing emojiId param." } });
+    
+    const locked = await kv.get(["LOCKED"]);
 
-  const emojiId = FOCUS_TO_EMOJI_ID[status];
+    if (locked.value) {
+      await kv.set(["pending", crypto.randomUUID()], { emojiId });
+      return makeResponse({ status: 202 });
+    }
 
-  await client.api.account.updateEmojiStatus({
-    emoji_status: new types.EmojiStatus({ document_id: BigInt(emojiId) }),
-  });
+    const client = getClient();
 
-  return new Response();
+    await client.start();
+
+    const response = await setStatus(client, emojiId);
+
+    await client.disconnect();
+
+    return response;
+  } catch (err) {
+    return makeResponse({ status: 500, body: { error: err.message ?? err } });
+  }
 });
+
+const lockStatus = await kv.watch([["LOCKED"]]);
+
+for await (const [status] of lockStatus) {
+  if (typeof status.value !== "boolean") continue;
+  if (status.value) continue;
+
+  console.log("Lock has been released. Looking for pending operations.");
+
+  const pendingOps = await kv.list<{ emojiId: string }>({ prefix: ["pending"] });
+  const pending: Array<{ key: Deno.KvKey; value: { emojiId: string } }> = [];
+
+  for await (const { key, value } of pendingOps) {
+    pending.push({ key, value });
+  }
+
+  if (!pending.length) {
+    console.log("No pending operations found.");
+    continue;
+  }
+
+  console.log(`Processing ${pending.length} pending operations`);
+
+  const client = getClient();
+
+  try {
+    await client.start();
+  } catch (err) {
+    console.error(err);
+    await client.disconnect();
+    continue;
+  }
+
+  await kv.set(["LOCKED"], true);
+
+  for (const { key, value } of pending) {
+    console.log(`Processing pending operation: ${key.toString().split(",").pop()}`);
+    await kv.delete(key);
+    await setStatus(client, value.emojiId, false);
+  }
+
+  await client.disconnect();
+  await kv.set(["LOCKED"], false);
+}

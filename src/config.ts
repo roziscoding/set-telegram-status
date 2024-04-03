@@ -6,6 +6,7 @@ const AppConfig = z.object({
   API_HASH: z.string().regex(/^[0-9a-fA-F]{32}$/),
   SESSION_STRING: z.string(),
   SECRET: z.string().optional(),
+  DENO_KV_PATH: z.string().optional()
 }).transform((data) => ({
   telegram: {
     id: data.API_ID,
@@ -13,6 +14,9 @@ const AppConfig = z.object({
   },
   session: data.SESSION_STRING,
   secret: data.SECRET,
+  kv: {
+    path: data.DENO_KV_PATH,
+  }
 }));
 
 export const config = AppConfig.parse(Deno.env.toObject());
