@@ -49,16 +49,22 @@ const setStatus = async (client: Client, emojiId: string, manageLock = true) => 
   }
 };
 
-Deno.serve(async (req) => {
+const processRequest = async (req: Request) => {
   try {
-    if (!isValidSecret(req, config.secret)) return makeResponse({ status: 401, body: { error: "Unauthorized" } });
-    if (!isValidRequest(req)) return makeResponse({ status: 400, body: { error: "Invalid request" } });
+    if (!isValidSecret(req, config.secret)) {
+      return makeResponse({ status: 401, body: { error: "Unauthorized" } });
+    }
+    if (!isValidRequest(req)) {
+      return makeResponse({ status: 400, body: { error: "Invalid request" } });
+    }
 
     const url = new URL(req.url);
     const emojiId = url.searchParams.get("emojiId");
 
-    if (!emojiId) return makeResponse({ status: 400, body: { error: "Invalid request. Missing emojiId param." } });
-    
+    if (!emojiId) {
+      return makeResponse({ status: 400, body: { error: "Invalid request. Missing emojiId param." } });
+    }
+
     const locked = await kv.get(["LOCKED"]);
 
     if (locked.value) {
@@ -74,10 +80,20 @@ Deno.serve(async (req) => {
 
     await client.disconnect();
 
-    return response;
+    return response
   } catch (err) {
     return makeResponse({ status: 500, body: { error: err.message ?? err } });
   }
+}
+
+Deno.serve(async (req) => {
+  const timeStart = Date.now();
+  const response = await processRequest(req)
+  const timeEnd = Date.now();
+
+  console.log(`[${req.method}] ${req.url} - ${response.status} - ${timeEnd - timeStart}ms`);
+  
+  return response;
 });
 
 const lockStatus = await kv.watch([["LOCKED"]]);
